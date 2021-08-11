@@ -357,6 +357,19 @@ void g2_mul(g2_t *out, const g2_t *a, const fr_t *b) {
 }
 
 /**
+ * Add or double G2 points.
+ *
+ * This is safe if the two points are the same.
+ *
+ * @param[out] out @p a plus @p b in the group
+ * @param[in]  a   G2 group point
+ * @param[in]  b   G2 group point
+ */
+void g2_add_or_dbl(g2_t* out, const g2_t* a, const g2_t* b) {
+    blst_p2_add_or_double(out, a, b);
+}
+
+/**
  * Subtraction of G2 group elements.
  *
  * @param[out] out @p a - @p b
