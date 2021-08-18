@@ -130,7 +130,7 @@ static C_KZG_RET toeplitz_coeffs_stride(poly *out, const poly *in, uint64_t offs
     k2 = k * 2;
 
     out->coeffs[0] = in->coeffs[n - 1 - offset];
-    for (uint64_t i = 1; i <= k + 1; i++) {
+    for (uint64_t i = 1; i <= k + 1 & i < k2; i++) {
         out->coeffs[i] = fr_zero;
     }
     for (uint64_t i = k + 2, j = 2 * stride - offset - 1; i < k2; i++, j += stride) {
