@@ -130,7 +130,7 @@ static C_KZG_RET toeplitz_coeffs_stride(poly *out, const poly *in, uint64_t offs
     k2 = k * 2;
 
     out->coeffs[0] = in->coeffs[n - 1 - offset];
-    for (uint64_t i = 1; i <= k + 1 & i < k2; i++) {
+    for (uint64_t i = 1; i <= k + 1 && i < k2; i++) {
         out->coeffs[i] = fr_zero;
     }
     for (uint64_t i = k + 2, j = 2 * stride - offset - 1; i < k2; i++, j += stride) {
@@ -621,11 +621,16 @@ void fk_multi_settings(void) {
     free_fk20_multi_settings(&fk);
 }
 
-void fk_multi_0(void) {
+void fk_multi_0() {
+    fk_multi_0_case(16);
+    fk_multi_0_case(1);
+}
+
+void fk_multi_0_case(int chunk_len) {
     FFTSettings fs;
     KZGSettings ks;
     FK20MultiSettings fk;
-    uint64_t n, chunk_len, chunk_count;
+    uint64_t n, chunk_count, width;
     uint64_t secrets_len;
     g1_t *s1;
     g2_t *s2;
@@ -640,13 +645,14 @@ void fk_multi_0(void) {
     chunk_len = 16;
     chunk_count = 32;
     n = chunk_len * chunk_count;
-    secrets_len = 2 * n;
+    width = 4 + 5 + 1;
+    secrets_len = 1 << width;
 
     TEST_CHECK(C_KZG_OK == new_g1_array(&s1, secrets_len));
     TEST_CHECK(C_KZG_OK == new_g2_array(&s2, secrets_len));
 
     generate_trusted_setup(s1, s2, &secret, secrets_len);
-    TEST_CHECK(C_KZG_OK == new_fft_settings(&fs, 4 + 5 + 1));
+    TEST_CHECK(C_KZG_OK == new_fft_settings(&fs, width));
     TEST_CHECK(C_KZG_OK == new_kzg_settings(&ks, s1, s2, secrets_len, &fs));
     TEST_CHECK(C_KZG_OK == new_fk20_multi_settings(&fk, n * 2, chunk_len, &ks));
 
