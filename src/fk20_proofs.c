@@ -637,7 +637,6 @@ void fk_multi_0_case(int chunk_len) {
     fr_t *ys, *ys2;
     uint64_t domain_stride;
 
-    chunk_len = 16;
     chunk_count = 32;
     n = chunk_len * chunk_count;
     width = 4 + 5 + 1;
