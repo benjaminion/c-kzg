@@ -621,11 +621,6 @@ void fk_multi_settings(void) {
     free_fk20_multi_settings(&fk);
 }
 
-void fk_multi_0() {
-    fk_multi_0_case(16);
-    fk_multi_0_case(1);
-}
-
 void fk_multi_0_case(int chunk_len) {
     FFTSettings fs;
     KZGSettings ks;
@@ -734,6 +729,11 @@ void fk_multi_0_case(int chunk_len) {
     free_fft_settings(&fs);
     free_kzg_settings(&ks);
     free_fk20_multi_settings(&fk);
+}
+
+void fk_multi_0() {
+    fk_multi_0_case(16);
+    fk_multi_0_case(1);
 }
 
 // TODO: compare results of fk20_multi_da_opt() and  fk20_compute_proof_multi()
