@@ -44,6 +44,21 @@ C_KZG_RET commit_to_poly(g1_t *out, const poly *p, const KZGSettings *ks) {
 }
 
 /**
+ * Make a KZG commitment to a polynomial in Lagrange form.
+ *
+ * @param[out] out The commitment to the polynomial, in the form of a G1 group point
+ * @param[in]  p_l The polynomial to be committed to
+ * @param[in]  ks  The settings containing the secrets, previously initialised with #new_kzg_settings
+ * @retval C_CZK_OK      All is well
+ * @retval C_CZK_BADARGS Invalid parameters were supplied
+ */
+C_KZG_RET commit_to_poly_l(g1_t *out, const poly_l *p_l, const KZGSettings *ks) {
+    CHECK(p_l->length <= ks->length);
+    g1_linear_combination(out, ks->secret_g1_l, p_l->values, p_l->length);
+    return C_KZG_OK;
+}
+
+/**
  * Compute KZG proof for polynomial at position x0.
  *
  * @param[out] out The proof, in the form of a G1 point
@@ -86,6 +101,66 @@ C_KZG_RET check_proof_single(bool *out, const g1_t *commitment, const g1_t *proo
 }
 
 /**
+ * Compute KZG proof for polynomial in Lagrange form at position x0
+ *
+ * @param[out] out The combined proof as a single G1 element
+ * @param[in]  p   The polynomial in Lagrange form
+ * @param[in]  x  The generator x-value for the evaluation points
+ * @param[in]  y   The value of @p p at @p x
+ * @param[in]  ks  The settings containing the secrets, previously initialised with #new_kzg_settings
+ * @retval C_KZG_OK      All is well
+ * @retval C_KZG_ERROR   An internal error occurred
+ * @retval C_KZG_MALLOC  Memory allocation failed
+ */
+C_KZG_RET compute_proof_single_l(g1_t *out, const poly_l *p, const fr_t *x, const fr_t *y, const KZGSettings *ks) {
+  fr_t tmp, tmp2;
+  poly_l q;
+  uint64_t i, m = 0;
+
+  new_poly_l(&q, p->length);
+
+  fr_t *inverses_in, *inverses;
+
+  TRY(new_fr_array(&inverses_in, p->length));
+  TRY(new_fr_array(&inverses, p->length));
+
+  for (i = 0; i < q.length; i++) {
+    if (fr_equal(x, &ks->fs->expanded_roots_of_unity[i])) {
+      m = i + 1;
+      continue;
+    }
+    // (p_i - y) / (ω_i - x)
+    fr_sub(&q.values[i], &p->values[i], y);
+    fr_sub(&inverses_in[i], &ks->fs->expanded_roots_of_unity[i], x);
+  }
+
+  TRY(fr_batch_inv(inverses, inverses_in, q.length));
+
+  for (i = 0; i < q.length; i++) {
+    fr_mul(&q.values[i], &q.values[i], &inverses[i]);
+  }  
+  if (m) { // ω_m == x
+    q.values[--m] = fr_zero;
+    for (i=0; i < q.length; i++) {
+      if (i == m) continue;
+      // (p_i - y) * ω_i / (x * (x - ω_i))
+      fr_sub(&tmp, x, &ks->fs->expanded_roots_of_unity[i]);
+      fr_mul(&inverses_in[i], &tmp, x);
+    }
+    TRY(fr_batch_inv(inverses, inverses_in, q.length));
+    for (i=0; i < q.length; i++) {
+      fr_sub(&tmp2, &p->values[i], y);
+      fr_mul(&tmp, &tmp2, &inverses[i]);
+      fr_mul(&tmp, &tmp, &ks->fs->expanded_roots_of_unity[i]);
+      fr_add(&q.values[m], &q.values[m], &tmp);
+    }
+  }
+  free(inverses_in);
+  free(inverses);
+  return commit_to_poly_l(out, &q, ks);
+}
+
+/**
  * Compute KZG proof for polynomial at positions x0 * w^y where w is an n-th root of unity.
  *
  * This constitutes the proof for one data availability sample, which consists
@@ -96,10 +171,10 @@ C_KZG_RET check_proof_single(bool *out, const g1_t *commitment, const g1_t *proo
  * @param[in]  x0  The generator x-value for the evaluation points
  * @param[in]  n   The number of points at which to evaluate the polynomial, must be a power of two
  * @param[in]  ks  The settings containing the secrets, previously initialised with #new_kzg_settings
- * @retval C_CZK_OK      All is well
- * @retval C_CZK_BADARGS Invalid parameters were supplied
- * @retval C_CZK_ERROR   An internal error occurred
- * @retval C_CZK_MALLOC  Memory allocation failed
+ * @retval C_KZG_OK      All is well
+ * @retval C_KZG_BADARGS Invalid parameters were supplied
+ * @retval C_KZG_ERROR   An internal error occurred
+ * @retval C_KZG_MALLOC  Memory allocation failed
  */
 C_KZG_RET compute_proof_multi(g1_t *out, const poly *p, const fr_t *x0, uint64_t n, const KZGSettings *ks) {
     poly divisor, q;
@@ -216,6 +291,7 @@ C_KZG_RET new_kzg_settings(KZGSettings *ks, const g1_t *secret_g1, const g2_t *s
 
     // Allocate space for the secrets
     TRY(new_g1_array(&ks->secret_g1, ks->length));
+    TRY(new_g1_array(&ks->secret_g1_l, ks->length));
     TRY(new_g2_array(&ks->secret_g2, ks->length));
 
     // Populate the secrets
@@ -225,7 +301,8 @@ C_KZG_RET new_kzg_settings(KZGSettings *ks, const g1_t *secret_g1, const g2_t *s
     }
     ks->fs = fs;
 
-    return C_KZG_OK;
+    // Add Lagrange form (and return its success)
+    return fft_g1(ks->secret_g1_l, ks->secret_g1, true, length, fs);
 }
 
 /**
@@ -235,6 +312,7 @@ C_KZG_RET new_kzg_settings(KZGSettings *ks, const g1_t *secret_g1, const g2_t *s
  */
 void free_kzg_settings(KZGSettings *ks) {
     free(ks->secret_g1);
+    free(ks->secret_g1_l);
     free(ks->secret_g2);
     ks->length = 0;
 }
@@ -248,7 +326,7 @@ void proof_single(void) {
     // Our polynomial: degree 15, 16 coefficients
     uint64_t coeffs[] = {1, 2, 3, 4, 7, 7, 7, 7, 13, 13, 13, 13, 13, 13, 13, 13};
     int poly_len = sizeof coeffs / sizeof coeffs[0];
-    uint64_t secrets_len = poly_len + 1;
+    uint64_t secrets_len = poly_len;
 
     FFTSettings fs;
     KZGSettings ks;
@@ -291,13 +369,116 @@ void proof_single(void) {
     free_poly(&p);
 }
 
+void proof_single_l(void) {
+    // Our polynomial: degree 15, 16 coefficients
+    uint64_t coeffs[] = {1, 2, 3, 4, 7, 7, 7, 7, 13, 13, 13, 13, 13, 13, 13, 13};
+    int poly_len = sizeof coeffs / sizeof coeffs[0];
+    uint64_t secrets_len = poly_len;
+
+    FFTSettings fs;
+    KZGSettings ks;
+    g1_t s1[secrets_len];
+    g2_t s2[secrets_len];
+    poly p;
+    poly_l p_l;
+    g1_t commitment, proof;
+    fr_t x, value;
+    bool result;
+
+    // Create the polynomial
+    new_poly(&p, poly_len);
+    for (int i = 0; i < poly_len; i++) {
+        fr_from_uint64(&p.coeffs[i], coeffs[i]);
+    }
+
+    // Initialise the secrets and data structures
+    generate_trusted_setup(s1, s2, &secret, secrets_len);
+    TEST_CHECK(C_KZG_OK == new_fft_settings(&fs, 4)); // ln_2 of poly_len
+    TEST_CHECK(C_KZG_OK == new_kzg_settings(&ks, s1, s2, secrets_len, &fs));
+
+    // Create Lagrange form
+    new_poly_l_from_poly(&p_l, &p, &ks);
+
+    // Compute the proof for x = 25
+    fr_from_uint64(&x, 25);
+    TEST_CHECK(C_KZG_OK == commit_to_poly_l(&commitment, &p_l, &ks));
+    eval_poly_l(&value, &p_l, &x, &fs);
+    TEST_CHECK(C_KZG_OK == compute_proof_single_l(&proof, &p_l, &x, &value, &ks));
+
+    // Verify the proof that the (unknown) polynomial has y = value at x = 25
+    TEST_CHECK(C_KZG_OK == check_proof_single(&result, &commitment, &proof, &x, &value, &ks));
+    TEST_CHECK(true == result);
+
+    // Change the value and check that the proof fails
+    fr_add(&value, &value, &fr_one);
+    TEST_CHECK(C_KZG_OK == check_proof_single(&result, &commitment, &proof, &x, &value, &ks));
+    TEST_CHECK(false == result);
+
+    free_fft_settings(&fs);
+    free_kzg_settings(&ks);
+    free_poly(&p);
+    free_poly_l(&p_l);
+}
+
+void proof_single_l_at_root(void) {
+    // Our polynomial: degree 15, 16 coefficients
+    uint64_t coeffs[] = {3, 2, 13, 4, 7, 7, 9, 7, 9913, 13, 8813, 13, 7713, 13, 5513, 14};
+    int poly_len = sizeof coeffs / sizeof coeffs[0];
+    uint64_t secrets_len = poly_len;
+
+    FFTSettings fs;
+    KZGSettings ks;
+    g1_t s1[secrets_len];
+    g2_t s2[secrets_len];
+    poly p;
+    poly_l p_l;
+    g1_t commitment, proof;
+    fr_t value;
+    fr_t *x;
+    bool result;
+
+    // Create the polynomial
+    new_poly(&p, poly_len);
+    for (int i = 0; i < poly_len; i++) {
+        fr_from_uint64(&p.coeffs[i], coeffs[i]);
+    }
+
+    // Initialise the secrets and data structures
+    generate_trusted_setup(s1, s2, &secret, secrets_len);
+    TEST_CHECK(C_KZG_OK == new_fft_settings(&fs, 4)); // ln_2 of poly_len
+    TEST_CHECK(C_KZG_OK == new_kzg_settings(&ks, s1, s2, secrets_len, &fs));
+
+    // Create Lagrange form
+    new_poly_l_from_poly(&p_l, &p, &ks);
+
+    // Compute the proof for x = the 5th root of unity
+    x = &fs.expanded_roots_of_unity[6];
+    TEST_CHECK(C_KZG_OK == commit_to_poly_l(&commitment, &p_l, &ks));
+    eval_poly_l(&value, &p_l, x, &fs);
+    TEST_CHECK(C_KZG_OK == compute_proof_single_l(&proof, &p_l, x, &value, &ks));
+
+    // Verify the proof that the (unknown) polynomial has y = value at x = ω_5
+    TEST_CHECK(C_KZG_OK == check_proof_single(&result, &commitment, &proof, x, &value, &ks));
+    TEST_CHECK(true == result);
+
+    // Change the value and check that the proof fails
+    fr_add(&value, &value, &fr_one);
+    TEST_CHECK(C_KZG_OK == check_proof_single(&result, &commitment, &proof, x, &value, &ks));
+    TEST_CHECK(false == result);
+
+    free_fft_settings(&fs);
+    free_kzg_settings(&ks);
+    free_poly(&p);
+    free_poly_l(&p_l);
+}
+
 void proof_multi(void) {
     // Our polynomial: degree 15, 16 coefficients
     uint64_t coeffs[] = {1, 2, 3, 4, 7, 7, 7, 7, 13, 13, 13, 13, 13, 13, 13, 13};
     int poly_len = sizeof coeffs / sizeof coeffs[0];
 
-    FFTSettings fs1, fs2;
-    KZGSettings ks1, ks2;
+    FFTSettings fs;
+    KZGSettings ks;
     poly p;
     g1_t commitment, proof;
     fr_t x, tmp;
@@ -307,7 +488,7 @@ void proof_multi(void) {
     int coset_scale = 3, coset_len = (1 << coset_scale);
     fr_t y[coset_len];
 
-    uint64_t secrets_len = poly_len > coset_len ? poly_len + 1 : coset_len + 1;
+    uint64_t secrets_len = poly_len > coset_len ? poly_len : coset_len;
     g1_t s1[secrets_len];
     g2_t s2[secrets_len];
 
@@ -319,38 +500,34 @@ void proof_multi(void) {
 
     // Initialise the secrets and data structures
     generate_trusted_setup(s1, s2, &secret, secrets_len);
-    TEST_CHECK(C_KZG_OK == new_fft_settings(&fs1, 4)); // ln_2 of poly_len
-    TEST_CHECK(C_KZG_OK == new_kzg_settings(&ks1, s1, s2, secrets_len, &fs1));
+    TEST_CHECK(C_KZG_OK == new_fft_settings(&fs, 4)); // ln_2 of poly_len
+    TEST_CHECK(C_KZG_OK == new_kzg_settings(&ks, s1, s2, secrets_len, &fs));
 
     // Commit to the polynomial
-    TEST_CHECK(C_KZG_OK == commit_to_poly(&commitment, &p, &ks1));
-
-    TEST_CHECK(C_KZG_OK == new_fft_settings(&fs2, coset_scale));
-    TEST_CHECK(C_KZG_OK == new_kzg_settings(&ks2, s1, s2, secrets_len, &fs2));
+    TEST_CHECK(C_KZG_OK == commit_to_poly(&commitment, &p, &ks));
 
     // Compute proof at the points [x * root_i] 0 <= i < coset_len
     fr_from_uint64(&x, 5431);
-    TEST_CHECK(C_KZG_OK == compute_proof_multi(&proof, &p, &x, coset_len, &ks2));
+    TEST_CHECK(C_KZG_OK == compute_proof_multi(&proof, &p, &x, coset_len, &ks));
 
     // y_i is the value of the polynomial at each x_i
+    uint64_t stride = secrets_len / coset_len;
     for (int i = 0; i < coset_len; i++) {
-        fr_mul(&tmp, &x, &ks2.fs->expanded_roots_of_unity[i]);
+        fr_mul(&tmp, &x, &fs.expanded_roots_of_unity[i * stride]);
         eval_poly(&y[i], &p, &tmp);
     }
 
     // Verify the proof that the (unknown) polynomial has value y_i at x_i
-    TEST_CHECK(C_KZG_OK == check_proof_multi(&result, &commitment, &proof, &x, y, coset_len, &ks2));
+    TEST_CHECK(C_KZG_OK == check_proof_multi(&result, &commitment, &proof, &x, y, coset_len, &ks));
     TEST_CHECK(true == result);
 
     // Change a value and check that the proof fails
     fr_add(y + coset_len / 2, y + coset_len / 2, &fr_one);
-    TEST_CHECK(C_KZG_OK == check_proof_multi(&result, &commitment, &proof, &x, y, coset_len, &ks2));
+    TEST_CHECK(C_KZG_OK == check_proof_multi(&result, &commitment, &proof, &x, y, coset_len, &ks));
     TEST_CHECK(false == result);
 
-    free_fft_settings(&fs1);
-    free_fft_settings(&fs2);
-    free_kzg_settings(&ks1);
-    free_kzg_settings(&ks2);
+    free_fft_settings(&fs);
+    free_kzg_settings(&ks);
     free_poly(&p);
 }
 
@@ -397,12 +574,164 @@ void commit_to_too_long_poly(void) {
     free_kzg_settings(&ks);
 }
 
+void commit_to_poly_lagrange(void) {
+    // Our polynomial: degree 15, 16 coefficients
+    uint64_t coeffs[] = {12, 2, 8, 4, 7, 9, 1337, 227, 3, 13, 13, 130, 13, 13111, 13, 12223};
+    int poly_len = sizeof coeffs / sizeof coeffs[0];
+    uint64_t secrets_len = poly_len;
+
+    FFTSettings fs;
+    KZGSettings ks;
+    g1_t s1[secrets_len];
+    g2_t s2[secrets_len];
+    poly p;
+    poly_l p_l;
+    g1_t commitment, commitment_l;
+
+    // Create the polynomial
+    new_poly(&p, poly_len);
+    for (int i = 0; i < poly_len; i++) {
+        fr_from_uint64(&p.coeffs[i], coeffs[i]);
+    }
+
+    // Initialise the secrets and data structures
+    generate_trusted_setup(s1, s2, &secret, secrets_len);
+    TEST_CHECK(C_KZG_OK == new_fft_settings(&fs, 4)); // ln_2 of poly_len
+    TEST_CHECK(C_KZG_OK == new_kzg_settings(&ks, s1, s2, secrets_len, &fs));
+
+    // Create Lagrange form
+    new_poly_l_from_poly(&p_l, &p, &ks);
+
+    // Compute commitments
+    TEST_CHECK(C_KZG_OK == commit_to_poly(&commitment, &p, &ks));
+    TEST_CHECK(C_KZG_OK == commit_to_poly_l(&commitment_l, &p_l, &ks));
+
+    // Check commitments are equal
+    TEST_CHECK(g1_equal(&commitment, &commitment_l));
+
+    free_fft_settings(&fs);
+    free_kzg_settings(&ks);
+    free_poly(&p);
+    free_poly_l(&p_l);
+}
+
+void poly_eval_l_check(void) {
+    uint64_t n = 10;
+    fr_t actual, expected;
+    poly p;
+    new_poly(&p, n);
+    for (uint64_t i = 0; i < n; i++) {
+        fr_from_uint64(&p.coeffs[i], i + 1);
+    }
+    fr_t x;
+    fr_from_uint64(&x, 39);
+    // x = fr_one;
+    eval_poly(&expected, &p, &x);
+
+    poly_l p_l;
+    FFTSettings fs;
+    KZGSettings ks;
+    uint64_t secrets_len = 16;
+    g1_t s1[secrets_len];
+    g2_t s2[secrets_len];
+
+    generate_trusted_setup(s1, s2, &secret, secrets_len);
+    TEST_CHECK(C_KZG_OK == new_fft_settings(&fs, 4)); // log_2(secrets_len)
+    TEST_CHECK(C_KZG_OK == new_kzg_settings(&ks, s1, s2, secrets_len, &fs));
+
+    TEST_CHECK(C_KZG_OK == new_poly_l_from_poly(&p_l, &p, &ks));
+
+    eval_poly_l(&actual, &p_l, &x, &fs);
+
+    TEST_CHECK(fr_equal(&expected, &actual));
+
+    free_fft_settings(&fs);
+    free_kzg_settings(&ks);
+    free_poly(&p);
+    free_poly_l(&p_l);
+}
+
+void eval_poly_l_at_first_root_of_unity(void) {
+    uint64_t n = 10;
+    fr_t actual, expected;
+    poly p;
+    new_poly(&p, n);
+    for (uint64_t i = 0; i < n; i++) {
+        fr_from_uint64(&p.coeffs[i], i + 2);
+    }
+
+    poly_l p_l;
+    FFTSettings fs;
+    KZGSettings ks;
+    uint64_t secrets_len = 16;
+    g1_t s1[secrets_len];
+    g2_t s2[secrets_len];
+
+    generate_trusted_setup(s1, s2, &secret, secrets_len);
+    TEST_CHECK(C_KZG_OK == new_fft_settings(&fs, 4)); // log_2(secrets_len)
+    TEST_CHECK(C_KZG_OK == new_kzg_settings(&ks, s1, s2, secrets_len, &fs));
+
+    eval_poly(&expected, &p, &fs.expanded_roots_of_unity[0]);
+
+    TEST_CHECK(C_KZG_OK == new_poly_l_from_poly(&p_l, &p, &ks));
+
+    eval_poly_l(&actual, &p_l, &fs.expanded_roots_of_unity[0], &fs);
+
+    TEST_CHECK(fr_equal(&expected, &actual));
+
+    free_fft_settings(&fs);
+    free_kzg_settings(&ks);
+    free_poly(&p);
+    free_poly_l(&p_l);
+}
+
+void eval_poly_l_at_another_root_of_unity(void) {
+    uint64_t n = 13;
+    fr_t actual, expected;
+    poly p;
+    new_poly(&p, n);
+    for (uint64_t i = 0; i < n; i++) {
+        fr_from_uint64(&p.coeffs[i], 2 * n - i);
+    }
+
+    poly_l p_l;
+    FFTSettings fs;
+    KZGSettings ks;
+    uint64_t secrets_len = 16;
+    g1_t s1[secrets_len];
+    g2_t s2[secrets_len];
+
+    generate_trusted_setup(s1, s2, &secret, secrets_len);
+    TEST_CHECK(C_KZG_OK == new_fft_settings(&fs, 4)); // log_2(secrets_len)
+    TEST_CHECK(C_KZG_OK == new_kzg_settings(&ks, s1, s2, secrets_len, &fs));
+
+    eval_poly(&expected, &p, &fs.expanded_roots_of_unity[5]);
+
+    TEST_CHECK(C_KZG_OK == new_poly_l_from_poly(&p_l, &p, &ks));
+
+    eval_poly_l(&actual, &p_l, &fs.expanded_roots_of_unity[5], &fs);
+
+    TEST_CHECK(fr_equal(&expected, &actual));
+
+    free_fft_settings(&fs);
+    free_kzg_settings(&ks);
+    free_poly(&p);
+    free_poly_l(&p_l);
+}
+
+
 TEST_LIST = {
     {"KZG_PROOFS_TEST", title},
+    {"poly_eval_l_check", poly_eval_l_check},
+    {"eval_poly_l_at_first_root_of_unity", eval_poly_l_at_first_root_of_unity},
+    {"eval_poly_l_at_another_root_of_unity", eval_poly_l_at_another_root_of_unity},
     {"proof_single", proof_single},
+    {"proof_single_l", proof_single_l},
+    {"proof_single_l_at_root", proof_single_l_at_root},
     {"proof_multi", proof_multi},
     {"commit_to_nil_poly", commit_to_nil_poly},
     {"commit_to_too_long_poly", commit_to_too_long_poly},
+    {"commit_to_poly_lagrange", commit_to_poly_lagrange},
     {NULL, NULL} /* zero record marks the end of the list */
 };
 

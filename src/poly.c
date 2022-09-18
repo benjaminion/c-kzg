@@ -103,6 +103,49 @@ void eval_poly(fr_t *out, const poly *p, const fr_t *x) {
 }
 
 /**
+ * Evaluate a polynomial in Lagrange form over the finite field at a point.
+ *
+ * @param[out] out The value of the polynomial at the point @p x
+ * @param[in]  p   The polynomial in Lagrange form
+ * @param[in]  x   The x-coordinate to be evaluated
+ */
+C_KZG_RET eval_poly_l(fr_t *out, const poly_l *p, const fr_t *x, const FFTSettings *fs) {
+  fr_t tmp, *inverses_in, *inverses;
+  uint64_t i;
+  const uint64_t stride = fs->max_width / p->length;
+
+  TRY(new_fr_array(&inverses_in, p->length));
+  TRY(new_fr_array(&inverses, p->length));
+  for (i = 0; i < p->length; i++) {
+    if (fr_equal(x, &fs->expanded_roots_of_unity[i * stride])) {
+      *out = p->values[i];
+      free(inverses_in);
+      free(inverses);
+      return C_KZG_OK;
+    }
+    fr_sub(&inverses_in[i], x, &fs->expanded_roots_of_unity[i * stride]);
+  }
+  TRY(fr_batch_inv(inverses, inverses_in, p->length));
+
+  *out = fr_zero;
+  for (i = 0; i < p->length; i++) {
+    fr_mul(&tmp, &inverses[i], &fs->expanded_roots_of_unity[i * stride]);
+    fr_mul(&tmp, &tmp, &p->values[i]);
+    fr_add(out, out, &tmp);
+  }
+  fr_from_uint64(&tmp, p->length);
+  fr_div(out, out, &tmp);
+  fr_pow(&tmp, x, p->length);
+  fr_sub(&tmp, &tmp, &fr_one);
+  fr_mul(out, out, &tmp);
+
+  free(inverses_in);
+  free(inverses);
+
+  return C_KZG_OK;
+}
+
+/**
  * Polynomial division in the finite field via long division.
  *
  * Returns the polynomial resulting from dividing @p dividend by @p divisor.
@@ -542,6 +585,21 @@ C_KZG_RET new_poly(poly *out, uint64_t length) {
 }
 
 /**
+ * Initialise an empty polynomial in Lagrange form of the given size.
+ *
+ * @remark This allocates space for the Lagrange values that must be later reclaimed by calling #free_poly_l.
+ *
+ * @param[out] out    The initialised polynomial structure
+ * @param[in]  length The number of coefficients required, which is one more than the polynomial's degree
+ * @retval C_CZK_OK      All is well
+ * @retval C_CZK_MALLOC  Memory allocation failed
+ */
+C_KZG_RET new_poly_l(poly_l *out, uint64_t length) {
+    out->length = length;
+    return new_fr_array(&out->values, length);
+}
+
+/**
  * Initialise a polynomial of the given size with the given coefficients.
  *
  * @remark This allocates space for the polynomial coefficients that must be later reclaimed by calling #free_poly.
@@ -563,6 +621,39 @@ C_KZG_RET new_poly_with_coeffs(poly *out, const fr_t *coeffs, uint64_t length) {
 }
 
 /**
+ * Initialise a polynomial in Lagrange form from the given polynomial in coefficient form.
+ *
+ * @remark This allocates space for the Lagrange values that must be later reclaimed by calling #free_poly_l.
+ *
+ * @param[out] out The initialised Lagrange polynomial structure
+ * @param[in]  in  The polynomial of which to compute the Lagrange form
+ * @param[in]  ks  The settings containing the roots of unity to use for DFT
+ * @retval C_CZK_OK      All is well
+ * @retval C_CZK_BADARGS Invalid settings, e.g., fft max_width too low for this polynomial
+ * @retval C_CZK_MALLOC  Memory allocation failed
+ */
+C_KZG_RET new_poly_l_from_poly(poly_l *out, const poly *in, const KZGSettings *ks) {
+  TRY(new_poly_l(out, ks->length));
+  if (out->length <= in->length) {
+    return fft_fr(out->values, in->coeffs, false, out->length, ks->fs);
+  }
+  else {
+    int i;
+    fr_t *coeffs;
+    TRY(new_fr_array(&coeffs, out->length));
+    for (i = 0; i < in->length; i++) {
+      coeffs[i] = in->coeffs[i];
+    }
+    for (; i < out->length; i++) {
+      coeffs[i] = fr_zero;
+    }
+    TRY(fft_fr(out->values, coeffs, false, out->length, ks->fs));
+    free(coeffs);
+    return C_KZG_OK;
+  }
+}
+
+/**
  * Reclaim the memory used by a polynomial.
  *
  * @remark To avoid memory leaks, this must be called for polynomials initialised with #new_poly or
@@ -573,6 +664,20 @@ C_KZG_RET new_poly_with_coeffs(poly *out, const fr_t *coeffs, uint64_t length) {
 void free_poly(poly *p) {
     if (p->coeffs != NULL) {
         free(p->coeffs);
+    }
+}
+
+/**
+ * Reclaim the memory used by a polynomial in Lagrange form.
+ *
+ * @remark To avoid memory leaks, this must be called for polynomials initialised with #new_poly_l or
+ * #new_poly_l_from_poly after use.
+ *
+ * @param[in,out] p The polynomial
+ */
+void free_poly_l(poly_l *p) {
+    if (p->values != NULL) {
+        free(p->values);
     }
 }
 
