@@ -19,3 +19,12 @@
 unsigned long tdiff(timespec_t start, timespec_t end) {
     return (end.tv_sec - start.tv_sec) * NANO + (end.tv_nsec - start.tv_nsec);
 }
+
+unsigned long tdiff_usec(timespec_t start, timespec_t end) {
+    long nsec = (end.tv_sec - start.tv_sec) * NANO + (end.tv_nsec - start.tv_nsec);
+    if (nsec < 1000) {
+        return 1;
+    } else {
+        return nsec / 1000;
+    }
+}

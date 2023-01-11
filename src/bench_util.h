@@ -22,3 +22,7 @@ typedef struct timespec timespec_t;
 #define NSEC 1
 
 unsigned long tdiff(timespec_t start, timespec_t end);
+unsigned long tdiff_usec(timespec_t start, timespec_t end);
+
+
+
