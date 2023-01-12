@@ -75,10 +75,8 @@ void init_trusted_setup(FFTSettings *fs, KZGSettings *ks, int scale) {
 /*
  * Runs the benchmark for the specified time.
  *
- * @param[out] commit_time          Time to create commitment
- * @param[out] eval_time            Time to evaluate the polynomial
- * @param[out] compute_proof_time   Time to compute evaluation proof(witness)
- * @param[out] check_proof_time     Time to check the evaluation + witness
+ * @param[out] run_time             Run time stats
+ * @param[in]  data                 Polynomial eval
  * @param[in]  scale                log of polynomial length(1 more than the polynomial degree)
  * @param[in]  max_seconds          Test duration
 */
