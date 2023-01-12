@@ -13,6 +13,28 @@
 // 32K * 32 bytes = 1 MB worth of data.
 const uint64_t MAX_FRS = 32 * 1024;
 
+// The time stats.
+typedef struct {
+    long interpolate_time;
+    long commit_time;
+    long eval_time;
+    long compute_proof_time;
+    long check_proof_time;
+} run_time_t;
+
+/**
+ * Initializes the run time stats.
+ *
+ * @param[out]  run_time   Run time stats
+ */
+void init_run_time(run_time_t* run_time) {
+    run_time->interpolate_time = 0;
+    run_time->commit_time = 0;
+    run_time->eval_time = 0;
+    run_time->compute_proof_time = 0;
+    run_time->check_proof_time = 0;
+}
+
 /**
  * Initializes the data with random Fr values.
  *
@@ -61,11 +83,7 @@ void init_trusted_setup(FFTSettings *fs, KZGSettings *ks, int scale) {
  * @param[in]  max_seconds          Test duration
 */
 void run_bench(
-    long *interpolate_time,
-    long *commit_time,
-    long *eval_time,
-    long *compute_proof_time,
-    long *check_proof_time,
+    run_time_t* run_time,
     fr_t* data,
     int scale,
     int max_seconds
@@ -82,6 +100,7 @@ void run_bench(
 
     init_trusted_setup(&fs, &ks, scale);
     fr_from_uint64(&eval_x, 1234);
+    init_run_time(run_time);
     while (total_time < max_seconds * NANO) {
         iter++;
         clock_gettime(CLOCK_REALTIME, &start_ts);
@@ -91,43 +110,43 @@ void run_bench(
         assert(C_KZG_OK == new_poly(&p, fs.max_width));
         assert(C_KZG_OK == fft_fr(p.coeffs, data, true, fs.max_width, ks.fs));
         clock_gettime(CLOCK_REALTIME, &t1);
-        *interpolate_time += tdiff_usec(t0, t1);
+        run_time->interpolate_time += tdiff_usec(t0, t1);
 
         // Create commitment
         clock_gettime(CLOCK_REALTIME, &t0);
         assert(C_KZG_OK == commit_to_poly(&commitment, &p, &ks));
         clock_gettime(CLOCK_REALTIME, &t1);
-        *commit_time += tdiff_usec(t0, t1);
+        run_time->commit_time += tdiff_usec(t0, t1);
 
         // Evaluate the polynomial
         clock_gettime(CLOCK_REALTIME, &t0);
         eval_poly(&eval_value, &p, &eval_x);
         clock_gettime(CLOCK_REALTIME, &t1);
-        *eval_time += tdiff_usec(t0, t1);
+        run_time->eval_time += tdiff_usec(t0, t1);
 
         // Create witness
         clock_gettime(CLOCK_REALTIME, &t0);
         assert(C_KZG_OK == compute_proof_single(&proof, &p, &eval_x, &ks));
         clock_gettime(CLOCK_REALTIME, &t1);
-        *compute_proof_time += tdiff_usec(t0, t1);
+        run_time->compute_proof_time += tdiff_usec(t0, t1);
 
         // Check the evaluation
         clock_gettime(CLOCK_REALTIME, &t0);
         assert(C_KZG_OK == check_proof_single(&result, &commitment, &proof, &eval_x, &eval_value, &ks));
         assert(result);
         clock_gettime(CLOCK_REALTIME, &t1);
-        *check_proof_time += tdiff_usec(t0, t1);
+        run_time->check_proof_time += tdiff_usec(t0, t1);
 
         clock_gettime(CLOCK_REALTIME, &end_ts);
         total_time += tdiff(start_ts, end_ts);
         free_poly(&p);
     }
 
-    *interpolate_time /= iter;
-    *commit_time /= iter;
-    *eval_time /= iter;
-    *compute_proof_time /= iter;
-    *check_proof_time /= iter;
+    run_time->interpolate_time /= iter;
+    run_time->commit_time /= iter;
+    run_time->eval_time /= iter;
+    run_time->compute_proof_time /= iter;
+    run_time->check_proof_time /= iter;
 
     free_kzg_settings(&ks);
     free_fft_settings(&fs);
@@ -154,12 +173,13 @@ int main(int argc, char *argv[]) {
     fr_t *data = init_data(MAX_FRS);
 
     printf("*** Benchmarking c_kzg, %d second%s per test.\n", nsec, nsec == 1 ? "" : "s");
-    long interpolate_time, commit_time, eval_time, compute_proof_time, check_proof_time;
-    run_bench(&interpolate_time, &commit_time, &compute_proof_time, &eval_time, &check_proof_time, data, 1, nsec);
-    run_bench(&interpolate_time, &commit_time, &compute_proof_time, &eval_time, &check_proof_time, data, 2, nsec);
+    run_time_t run_time;
+    run_bench(&run_time, data, 1, nsec);
+    run_bench(&run_time, data, 2, nsec);
     for (int scale = 1; scale <= 15; scale++) {
-        run_bench(&interpolate_time, &commit_time, &compute_proof_time, &eval_time, &check_proof_time, data, scale, nsec);
+        run_bench(&run_time, data, scale, nsec);
         printf("data_len = %5d: interpolate = %6lu, commitment = %6lu, eval = %6lu, compute_proof = %6lu, check_proof = %6lu  (usec/op)\n",
-                1 << scale, interpolate_time, commit_time, eval_time, compute_proof_time, check_proof_time);
+                1 << scale, run_time.interpolate_time, run_time.commit_time, run_time.eval_time,
+                run_time.compute_proof_time, run_time.check_proof_time);
     }
 }
