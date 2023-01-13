@@ -29,7 +29,6 @@ libckzg.a: $(LIB_OBJ) Makefile
 %_bench: KZG_CFLAGS += -O
 %_bench: %_bench.c bench_util.o test_util.o libckzg.a Makefile
 	clang -Wall -I$(INCLUDE_DIRS) $(CFLAGS) $(KZG_CFLAGS) -o $@ $@.c bench_util.o test_util.o libckzg.a -L../lib -lblst
-	./$@
 
 # Tuning
 %_tune: KZG_CFLAGS += -O
