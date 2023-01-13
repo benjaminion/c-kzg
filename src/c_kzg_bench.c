@@ -15,6 +15,8 @@ const uint64_t MAX_FRS = 32 * 1024;
 
 // The time stats.
 typedef struct {
+    long data_bytes;
+    long polynomial_len;
     long interpolate_time;
     long commit_time;
     long eval_time;
@@ -28,6 +30,8 @@ typedef struct {
  * @param[out]  run_time   Run time stats
  */
 void init_run_time(run_time_t* run_time) {
+    run_time->data_bytes = 0;
+    run_time->polynomial_len = 0;
     run_time->interpolate_time = 0;
     run_time->commit_time = 0;
     run_time->eval_time = 0;
@@ -108,6 +112,8 @@ void run_bench(
         assert(C_KZG_OK == new_poly(&p, fs.max_width));
         assert(C_KZG_OK == fft_fr(p.coeffs, data, true, fs.max_width, ks.fs));
         clock_gettime(CLOCK_REALTIME, &t1);
+        run_time->data_bytes += fs.max_width * sizeof(fr_t);
+        run_time->polynomial_len += p.length;
         run_time->interpolate_time += tdiff_usec(t0, t1);
 
         // Create commitment
@@ -140,6 +146,8 @@ void run_bench(
         free_poly(&p);
     }
 
+    run_time->data_bytes /= iter;
+    run_time->polynomial_len /= iter;
     run_time->interpolate_time /= iter;
     run_time->commit_time /= iter;
     run_time->eval_time /= iter;
@@ -176,8 +184,10 @@ int main(int argc, char *argv[]) {
     run_bench(&run_time, data, 2, nsec);
     for (int scale = 1; scale <= 15; scale++) {
         run_bench(&run_time, data, scale, nsec);
-        printf("data_len = %5d: interpolate = %6lu, commitment = %6lu, eval = %6lu, compute_proof = %6lu, check_proof = %6lu  (usec/op)\n",
-                1 << scale, run_time.interpolate_time, run_time.commit_time, run_time.eval_time,
+        printf("data = %7lu bytes(polynomial_len = %5lu): interpolate = %6lu, commitment = %6lu, eval = %6lu, "
+                "compute_proof = %6lu, check_proof = %6lu  (usec/op)\n",
+                run_time.data_bytes, run_time.polynomial_len,
+                run_time.interpolate_time, run_time.commit_time, run_time.eval_time,
                 run_time.compute_proof_time, run_time.check_proof_time);
     }
 }
