@@ -184,8 +184,8 @@ int main(int argc, char *argv[]) {
     run_bench(&run_time, data, 2, nsec);
     for (int scale = 1; scale <= 15; scale++) {
         run_bench(&run_time, data, scale, nsec);
-        printf("data = %7lu bytes(polynomial_len = %5lu): interpolate = %6lu, commitment = %6lu, eval = %6lu, "
-                "compute_proof = %6lu, check_proof = %6lu  (usec/op)\n",
+        printf("data = %7lu bytes(polynomial_len = %5lu): create-polynomial = %6lu, commit = %6lu, eval = %6lu, "
+                "create-witness = %6lu, verify = %6lu  (usec/op)\n",
                 run_time.data_bytes, run_time.polynomial_len,
                 run_time.interpolate_time, run_time.commit_time, run_time.eval_time,
                 run_time.compute_proof_time, run_time.check_proof_time);
