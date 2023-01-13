@@ -112,7 +112,7 @@ void run_bench(
 
         // Create commitment
         clock_gettime(CLOCK_REALTIME, &t0);
-        assert(C_KZG_OK == commit_to_poly(&commitment, &p, &ks));
+        assert(C_KZG_OK == commit_to_poly_par(&commitment, &p, &ks, 8));
         clock_gettime(CLOCK_REALTIME, &t1);
         run_time->commit_time += tdiff_usec(t0, t1);
 

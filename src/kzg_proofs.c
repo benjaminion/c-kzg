@@ -23,10 +23,19 @@
  * Applications](https://www.iacr.org/archive/asiacrypt2010/6477178/6477178.pdf) for the theoretical background.
  */
 
+#include <assert.h>
+#include <pthread.h>
 #include <stddef.h> // NULL
 #include "control.h"
 #include "c_kzg_alloc.h"
 #include "utility.h"
+
+typedef struct commit_par {
+    g1_t out;
+    g1_t *g1;
+    fr_t* coeffs;
+    uint64_t length;
+} commit_par_t;
 
 /**
  * Make a KZG commitment to a polynomial.
@@ -40,6 +49,77 @@
 C_KZG_RET commit_to_poly(g1_t *out, const poly *p, const KZGSettings *ks) {
     CHECK(p->length <= ks->length);
     g1_linear_combination(out, ks->secret_g1, p->coeffs, p->length);
+    return C_KZG_OK;
+}
+
+void* g1_linear_combination_thread(void* p) {
+    commit_par_t* out_par = (commit_par_t *)p;
+    g1_linear_combination(&(out_par->out), out_par->g1, out_par->coeffs, out_par->length);
+    pthread_exit(NULL);
+}
+
+/**
+ * Make a KZG commitment to a polynomial, using parallelism if needed.
+ *
+ * @param[out] out          The commitment to the polynomial, in the form of a G1 group point
+ * @param[in]  p            The polynomial to be committed to
+ * @param[in]  ks           The settings containing the secrets, previously initialised with
+ *                          #new_kzg_settings
+ * @param[in]  parallelism  Max parallelism to use
+ * @retval C_CZK_OK      All is well
+ * @retval C_CZK_BADARGS Invalid parameters were supplied
+ */
+C_KZG_RET commit_to_poly_par(g1_t *out, const poly *p, const KZGSettings *ks, uint64_t parallelism) {
+    uint64_t rounded, chunk_size;
+    uint64_t left, cur_len;
+    g1_t *cur_g1;
+    commit_par_t* out_par;
+    pthread_t *threads;
+    fr_t* cur_coeff;
+
+    CHECK(p->length <= ks->length);
+    if (p->length < parallelism) {
+        g1_linear_combination(out, ks->secret_g1, p->coeffs, p->length);
+        return C_KZG_OK;
+    }
+
+    // Process in chunks
+    rounded = ((p->length + parallelism - 1) / parallelism) * parallelism;
+    chunk_size = rounded / parallelism;
+    out_par = malloc(parallelism * sizeof (commit_par_t));
+    threads = malloc(parallelism * sizeof(pthread_t));
+    left = p->length;
+    cur_g1 = ks->secret_g1;
+    cur_coeff = p->coeffs;
+    for (uint64_t i = 0; i < parallelism; i++) {
+        if (left >= chunk_size) {
+            cur_len = chunk_size;
+        } else {
+            cur_len = left;
+        }
+
+        out_par[i].g1 = cur_g1;
+        out_par[i].coeffs = cur_coeff;
+        out_par[i].length = cur_len;
+        pthread_create(threads + i, NULL, g1_linear_combination_thread, (void*) (out_par + i));
+
+        cur_g1 += cur_len;
+        cur_coeff += cur_len;
+        left -= cur_len;
+    }
+    assert(left == 0);
+
+    for (uint64_t i = 0; i < parallelism; i++) {
+        pthread_join(threads[i], NULL);
+    }
+
+    // Combine the outputs.
+    *out = g1_identity;
+    for (uint64_t i = 0; i < parallelism; i++) {
+        g1_add_or_dbl(out, out, &(out_par[i].out));
+    }
+
+    free(out_par);
     return C_KZG_OK;
 }
 

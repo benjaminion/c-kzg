@@ -112,6 +112,7 @@ typedef struct {
 } KZGSettings;
 
 C_KZG_RET commit_to_poly(g1_t *out, const poly *p, const KZGSettings *ks);
+C_KZG_RET commit_to_poly_par(g1_t *out, const poly *p, const KZGSettings *ks, uint64_t parallelism);
 C_KZG_RET compute_proof_single(g1_t *out, const poly *p, const fr_t *x0, const KZGSettings *ks);
 C_KZG_RET check_proof_single(bool *out, const g1_t *commitment, const g1_t *proof, const fr_t *x, fr_t *y,
                              const KZGSettings *ks);
