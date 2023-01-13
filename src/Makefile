@@ -26,7 +26,7 @@ libckzg.a: $(LIB_OBJ) Makefile
 	clang -Wall -DKZGTEST -DDEBUG -I$(INCLUDE_DIRS) $(CFLAGS) $(KZG_CFLAGS) -o $@ $*.c debug_util.o test_util.o libckzg.a -L../lib -lblst
 
 # Benchmarks
-%_bench: KZG_CFLAGS += -O
+%_bench: KZG_CFLAGS += -O3
 %_bench: %_bench.c bench_util.o test_util.o libckzg.a Makefile
 	clang -Wall -I$(INCLUDE_DIRS) $(CFLAGS) $(KZG_CFLAGS) -o $@ $@.c bench_util.o test_util.o libckzg.a -L../lib -lblst
 
