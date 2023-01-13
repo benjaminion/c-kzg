@@ -37,6 +37,10 @@ typedef struct commit_par {
     uint64_t length;
 } commit_par_t;
 
+static C_KZG_RET compute_proof_multi_internal(g1_t *out, const poly *p, const fr_t *x0, uint64_t n,
+                                              const KZGSettings *ks, uint64_t* parallelism);
+static void* g1_linear_combination_thread(void* p) ;
+
 /**
  * Make a KZG commitment to a polynomial.
  *
@@ -50,12 +54,6 @@ C_KZG_RET commit_to_poly(g1_t *out, const poly *p, const KZGSettings *ks) {
     CHECK(p->length <= ks->length);
     g1_linear_combination(out, ks->secret_g1, p->coeffs, p->length);
     return C_KZG_OK;
-}
-
-void* g1_linear_combination_thread(void* p) {
-    commit_par_t* out_par = (commit_par_t *)p;
-    g1_linear_combination(&(out_par->out), out_par->g1, out_par->coeffs, out_par->length);
-    pthread_exit(NULL);
 }
 
 /**
@@ -124,6 +122,17 @@ C_KZG_RET commit_to_poly_par(g1_t *out, const poly *p, const KZGSettings *ks, ui
 }
 
 /**
+ * Thread processing to create the commitment.
+ *
+ * @param[in]  p  Thread args.
+ */
+void* g1_linear_combination_thread(void* p) {
+    commit_par_t* out_par = (commit_par_t *)p;
+    g1_linear_combination(&(out_par->out), out_par->g1, out_par->coeffs, out_par->length);
+    pthread_exit(NULL);
+}
+
+/**
  * Compute KZG proof for polynomial at position x0.
  *
  * @param[out] out The proof, in the form of a G1 point
@@ -135,7 +144,23 @@ C_KZG_RET commit_to_poly_par(g1_t *out, const poly *p, const KZGSettings *ks, ui
  * @retval C_CZK_MALLOC  Memory allocation failed
  */
 C_KZG_RET compute_proof_single(g1_t *out, const poly *p, const fr_t *x0, const KZGSettings *ks) {
-    return compute_proof_multi(out, p, x0, 1, ks);
+    return compute_proof_multi_internal(out, p, x0, 1, ks, NULL);
+}
+
+/**
+ * Compute KZG proof for polynomial at position x0, using parallelism if needed.
+ *
+ * @param[out] out The proof, in the form of a G1 point
+ * @param[in]  p   The polynomial
+ * @param[in]  x0  The x-value the polynomial is to be proved at
+ * @param[in]  ks  The settings containing the secrets, previously initialised with #new_kzg_settings
+ * @retval C_CZK_OK      All is well
+ * @retval C_CZK_ERROR   An internal error occurred
+ * @retval C_CZK_MALLOC  Memory allocation failed
+ */
+C_KZG_RET compute_proof_single_par(g1_t *out, const poly *p, const fr_t *x0, const KZGSettings *ks,
+                                   uint64_t parallelism) {
+    return compute_proof_multi_internal(out, p, x0, 1, ks, &parallelism);
 }
 
 /**
@@ -182,6 +207,49 @@ C_KZG_RET check_proof_single(bool *out, const g1_t *commitment, const g1_t *proo
  * @retval C_CZK_MALLOC  Memory allocation failed
  */
 C_KZG_RET compute_proof_multi(g1_t *out, const poly *p, const fr_t *x0, uint64_t n, const KZGSettings *ks) {
+    return compute_proof_multi_internal(out, p, x0, n, ks, NULL);
+}
+
+/**
+ * Compute KZG proof for polynomial at positions x0 * w^y where w is an n-th root of unity, use
+ * parallelism if needed.
+ *
+ * This constitutes the proof for one data availability sample, which consists
+ * of several polynomial evaluations.
+ *
+ * @param[out] out The combined proof as a single G1 element
+ * @param[in]  p   The polynomial
+ * @param[in]  x0  The generator x-value for the evaluation points
+ * @param[in]  n   The number of points at which to evaluate the polynomial, must be a power of two
+ * @param[in]  ks  The settings containing the secrets, previously initialised with #new_kzg_settings
+ * @retval C_CZK_OK      All is well
+ * @retval C_CZK_BADARGS Invalid parameters were supplied
+ * @retval C_CZK_ERROR   An internal error occurred
+ * @retval C_CZK_MALLOC  Memory allocation failed
+ */
+C_KZG_RET compute_proof_multi_par(g1_t *out, const poly *p, const fr_t *x0, uint64_t n, const KZGSettings *ks,
+                                  uint64_t parallelism) {
+    return compute_proof_multi_internal(out, p, x0, n, ks, &parallelism);
+}
+
+/**
+ * Helper to compute KZG proof for polynomial at positions x0 * w^y where w is an n-th root of unity.
+ *
+ * This constitutes the proof for one data availability sample, which consists
+ * of several polynomial evaluations.
+ *
+ * @param[out] out The combined proof as a single G1 element
+ * @param[in]  p   The polynomial
+ * @param[in]  x0  The generator x-value for the evaluation points
+ * @param[in]  n   The number of points at which to evaluate the polynomial, must be a power of two
+ * @param[in]  ks  The settings containing the secrets, previously initialised with #new_kzg_settings
+ * @retval C_CZK_OK      All is well
+ * @retval C_CZK_BADARGS Invalid parameters were supplied
+ * @retval C_CZK_ERROR   An internal error occurred
+ * @retval C_CZK_MALLOC  Memory allocation failed
+ */
+static C_KZG_RET compute_proof_multi_internal(g1_t *out, const poly *p, const fr_t *x0, uint64_t n,
+                                              const KZGSettings *ks, uint64_t* parallelism) {
     poly divisor, q;
     fr_t x_pow_n;
 
@@ -205,7 +273,11 @@ C_KZG_RET compute_proof_multi(g1_t *out, const poly *p, const fr_t *x0, uint64_t
     // Calculate q = p / (x^n - x0^n)
     TRY(new_poly_div(&q, p, &divisor));
 
-    TRY(commit_to_poly(out, &q, ks));
+    if (parallelism == NULL) {
+        TRY(commit_to_poly(out, &q, ks));
+    } else {
+        TRY(commit_to_poly_par(out, &q, ks, *parallelism));
+    }
 
     free_poly(&q);
     free_poly(&divisor);

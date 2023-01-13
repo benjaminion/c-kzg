@@ -124,7 +124,7 @@ void run_bench(
 
         // Create witness
         clock_gettime(CLOCK_REALTIME, &t0);
-        assert(C_KZG_OK == compute_proof_single(&proof, &p, &eval_x, &ks));
+        assert(C_KZG_OK == compute_proof_single_par(&proof, &p, &eval_x, &ks, 8));
         clock_gettime(CLOCK_REALTIME, &t1);
         run_time->compute_proof_time += tdiff_usec(t0, t1);
 
