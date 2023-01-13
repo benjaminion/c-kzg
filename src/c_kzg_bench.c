@@ -7,8 +7,9 @@
 #include <time.h>
 #include <unistd.h> // EXIT_SUCCESS/FAILURE
 #include "bench_util.h"
-#include "test_util.h"
 #include "c_kzg.h"
+#include "test_util.h"
+#include "utility.h"
 
 // 32K * 32 bytes = 1 MB worth of data.
 const uint64_t MAX_FRS = 32 * 1024;
@@ -20,6 +21,7 @@ typedef struct {
     long interpolate_time;
     long commit_time;
     long eval_time;
+    long quotient_time;
     long compute_proof_time;
     long check_proof_time;
 } run_time_t;
@@ -35,6 +37,7 @@ void init_run_time(run_time_t* run_time) {
     run_time->interpolate_time = 0;
     run_time->commit_time = 0;
     run_time->eval_time = 0;
+    run_time->quotient_time = 0;
     run_time->compute_proof_time = 0;
     run_time->check_proof_time = 0;
 }
@@ -76,6 +79,29 @@ void init_trusted_setup(FFTSettings *fs, KZGSettings *ks, int scale) {
     assert(C_KZG_OK == new_kzg_settings(ks, s1, s2, fs->max_width, fs));
 }
 
+/**
+ * Creates the quotient polynomial.
+ *
+ * @param[out] q       The quotient polynomial
+ * @param[in]  p       The polynomial
+ * @param[in]  a       The evaluation point
+ */
+void create_quotient_poly(
+    poly *q,
+    poly* p,
+    fr_t *a
+) {
+    poly divisor;
+
+    // (x - a)
+    assert(C_KZG_OK == new_poly(&divisor, 2));
+    fr_negate(&divisor.coeffs[0], a);
+    divisor.coeffs[1] = fr_one;
+
+    assert(C_KZG_OK == new_poly_div(q, p, &divisor));
+    free_poly(&divisor);
+}
+
 /*
  * Runs the benchmark for the specified time.
  *
@@ -97,7 +123,7 @@ void run_bench(
     KZGSettings ks;
     g1_t commitment, proof;
     fr_t eval_x, eval_value;
-    poly p;
+    poly p, q;
     bool result;
 
     init_trusted_setup(&fs, &ks, scale);
@@ -128,9 +154,15 @@ void run_bench(
         clock_gettime(CLOCK_REALTIME, &t1);
         run_time->eval_time += tdiff_usec(t0, t1);
 
+        // Create the quotient polynomial
+        clock_gettime(CLOCK_REALTIME, &t0);
+        create_quotient_poly(&q, &p, &eval_x);
+        clock_gettime(CLOCK_REALTIME, &t1);
+        run_time->quotient_time += tdiff_usec(t0, t1);
+
         // Create witness
         clock_gettime(CLOCK_REALTIME, &t0);
-        assert(C_KZG_OK == compute_proof_single_par(&proof, &p, &eval_x, &ks, 8));
+        assert(C_KZG_OK == commit_to_poly_par(&proof, &q, &ks, 8));
         clock_gettime(CLOCK_REALTIME, &t1);
         run_time->compute_proof_time += tdiff_usec(t0, t1);
 
@@ -143,6 +175,7 @@ void run_bench(
 
         clock_gettime(CLOCK_REALTIME, &end_ts);
         total_time += tdiff(start_ts, end_ts);
+        free_poly(&q);
         free_poly(&p);
     }
 
@@ -151,6 +184,7 @@ void run_bench(
     run_time->interpolate_time /= iter;
     run_time->commit_time /= iter;
     run_time->eval_time /= iter;
+    run_time->quotient_time /= iter;
     run_time->compute_proof_time /= iter;
     run_time->check_proof_time /= iter;
 
@@ -185,9 +219,10 @@ int main(int argc, char *argv[]) {
     for (int scale = 1; scale <= 15; scale++) {
         run_bench(&run_time, data, scale, nsec);
         printf("data = %7lu bytes(polynomial_len = %5lu): create-polynomial = %6lu, commit = %6lu, eval = %6lu, "
-                "create-witness = %6lu, verify = %6lu  (usec/op)\n",
+                "quotient = %6lu, create-witness = %6lu, verify = %6lu  (usec/op)\n",
                 run_time.data_bytes, run_time.polynomial_len,
                 run_time.interpolate_time, run_time.commit_time, run_time.eval_time,
-                run_time.compute_proof_time, run_time.check_proof_time);
+                run_time.quotient_time, run_time.compute_proof_time,
+                run_time.check_proof_time);
     }
 }
