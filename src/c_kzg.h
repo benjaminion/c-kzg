@@ -107,6 +107,7 @@ void free_poly(poly *p);
 typedef struct {
     const FFTSettings *fs; /**< The corresponding settings for performing FFTs */
     g1_t *secret_g1;       /**< G1 group elements from the trusted setup */
+    blst_p1_affine *secret_g1_affine; /**< Affine representation of G1 group elements */
     g2_t *secret_g2;       /**< G2 group elements from the trusted setup */
     uint64_t length;       /**< The number of elements in secret_g1 and secret_g2 */
 } KZGSettings;

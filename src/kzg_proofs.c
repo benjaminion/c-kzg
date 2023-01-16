@@ -377,6 +377,11 @@ C_KZG_RET new_kzg_settings(KZGSettings *ks, const g1_t *secret_g1, const g2_t *s
     }
     ks->fs = fs;
 
+    // Pre-compute the g1 affine transformations
+    ks->secret_g1_affine = malloc(ks->length * sizeof(blst_p1_affine));
+    const blst_p1 *p_arg[2] = {ks->secret_g1, NULL};
+    blst_p1s_to_affine(ks->secret_g1_affine, p_arg, ks->length);
+
     return C_KZG_OK;
 }
 
@@ -388,6 +393,7 @@ C_KZG_RET new_kzg_settings(KZGSettings *ks, const g1_t *secret_g1, const g2_t *s
 void free_kzg_settings(KZGSettings *ks) {
     free(ks->secret_g1);
     free(ks->secret_g2);
+    free(ks->secret_g1_affine);
     ks->length = 0;
 }
 
