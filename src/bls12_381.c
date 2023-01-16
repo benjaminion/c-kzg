@@ -412,7 +412,7 @@ void g2_dbl(g2_t *out, const g2_t *a) {
  *
  * We do the second of these to save memory here.
  */
-void g1_linear_combination(g1_t *out, const g1_t *p, const fr_t *coeffs, const uint64_t len) {
+void g1_linear_combination(g1_t *out, const g1_t *p, const blst_p1_affine *p_affine, const fr_t *coeffs, const uint64_t len) {
 
     if (len < 8) { // Tunable parameter: must be at least 2 since Blst fails for 0 or 1
         // Direct approach
@@ -425,12 +425,7 @@ void g1_linear_combination(g1_t *out, const g1_t *p, const fr_t *coeffs, const u
     } else {
         // Blst's implementation of the Pippenger method
         void *scratch = malloc(blst_p1s_mult_pippenger_scratch_sizeof(len));
-        blst_p1_affine *p_affine = malloc(len * sizeof(blst_p1_affine));
         blst_scalar *scalars = malloc(len * sizeof(blst_scalar));
-
-        // Transform the points to affine representation
-        const blst_p1 *p_arg[2] = {p, NULL};
-        blst_p1s_to_affine(p_affine, p_arg, len);
 
         // Transform the field elements to 256-bit scalars
         for (int i = 0; i < len; i++) {
@@ -444,7 +439,6 @@ void g1_linear_combination(g1_t *out, const g1_t *p, const fr_t *coeffs, const u
 
         // Tidy up
         free(scratch);
-        free(p_affine);
         free(scalars);
     }
 }
@@ -665,17 +659,21 @@ void g1_make_linear_combination(void) {
     int len = 255;
     fr_t coeffs[len], tmp;
     g1_t p[len], res, exp;
+    blst_p1_affine affine[len];
     for (int i = 0; i < len; i++) {
         fr_from_uint64(coeffs + i, i + 1);
         p[i] = g1_generator;
     }
+
+    const blst_p1 *p_arg[2] = {p, NULL};
+    blst_p1s_to_affine(affine, p_arg, len);
 
     // Expected result
     fr_from_uint64(&tmp, len * (len + 1) / 2);
     g1_mul(&exp, &g1_generator, &tmp);
 
     // Test result
-    g1_linear_combination(&res, p, coeffs, len);
+    g1_linear_combination(&res, p, affine, coeffs, len);
     TEST_CHECK(g1_equal(&exp, &res));
 }
 
@@ -683,11 +681,15 @@ void g1_random_linear_combination(void) {
     int len = 8192;
     fr_t coeffs[len];
     g1_t p[len], p1tmp = g1_generator;
+    blst_p1_affine affine[len];
     for (int i = 0; i < len; i++) {
         coeffs[i] = rand_fr();
         p[i] = p1tmp;
         g1_dbl(&p1tmp, &p1tmp);
     }
+
+    const blst_p1 *p_arg[2] = {p, NULL};
+    blst_p1s_to_affine(affine, p_arg, len);
 
     // Expected result
     g1_t exp = g1_identity;
@@ -698,7 +700,7 @@ void g1_random_linear_combination(void) {
 
     // Test result
     g1_t res;
-    g1_linear_combination(&res, p, coeffs, len);
+    g1_linear_combination(&res, p, affine, coeffs, len);
     TEST_CHECK(g1_equal(&exp, &res));
 }
 

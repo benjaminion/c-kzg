@@ -129,7 +129,7 @@ void g2_mul(g2_t *out, const g2_t *a, const fr_t *b);
 void g2_add_or_dbl(g2_t *out, const g2_t *a, const g2_t *b);
 void g2_sub(g2_t *out, const g2_t *a, const g2_t *b);
 void g2_dbl(g2_t *out, const g2_t *a);
-void g1_linear_combination(g1_t *out, const g1_t *p, const fr_t *coeffs, const uint64_t len);
+void g1_linear_combination(g1_t *out, const g1_t *p, const blst_p1_affine *g1_affine, const fr_t *coeffs, const uint64_t len);
 bool pairings_verify(const g1_t *a1, const g2_t *a2, const g1_t *b1, const g2_t *b2);
 
 #endif // BLS12_381_H

@@ -33,6 +33,7 @@
 typedef struct commit_par {
     g1_t out;
     g1_t *g1;
+    blst_p1_affine *g1_affine;
     fr_t* coeffs;
     uint64_t length;
 } commit_par_t;
@@ -52,7 +53,7 @@ static void* g1_linear_combination_thread(void* p) ;
  */
 C_KZG_RET commit_to_poly(g1_t *out, const poly *p, const KZGSettings *ks) {
     CHECK(p->length <= ks->length);
-    g1_linear_combination(out, ks->secret_g1, p->coeffs, p->length);
+    g1_linear_combination(out, ks->secret_g1, ks->secret_g1_affine, p->coeffs, p->length);
     return C_KZG_OK;
 }
 
@@ -71,13 +72,14 @@ C_KZG_RET commit_to_poly_par(g1_t *out, const poly *p, const KZGSettings *ks, ui
     uint64_t rounded, chunk_size;
     uint64_t left, cur_len;
     g1_t *cur_g1;
+    blst_p1_affine *cur_g1_affine;
     commit_par_t* out_par;
     pthread_t *threads;
     fr_t* cur_coeff;
 
     CHECK(p->length <= ks->length);
     if (p->length < parallelism) {
-        g1_linear_combination(out, ks->secret_g1, p->coeffs, p->length);
+        g1_linear_combination(out, ks->secret_g1, ks->secret_g1_affine, p->coeffs, p->length);
         return C_KZG_OK;
     }
 
@@ -88,6 +90,7 @@ C_KZG_RET commit_to_poly_par(g1_t *out, const poly *p, const KZGSettings *ks, ui
     threads = malloc(parallelism * sizeof(pthread_t));
     left = p->length;
     cur_g1 = ks->secret_g1;
+    cur_g1_affine = ks->secret_g1_affine;
     cur_coeff = p->coeffs;
     for (uint64_t i = 0; i < parallelism; i++) {
         if (left >= chunk_size) {
@@ -97,11 +100,13 @@ C_KZG_RET commit_to_poly_par(g1_t *out, const poly *p, const KZGSettings *ks, ui
         }
 
         out_par[i].g1 = cur_g1;
+        out_par[i].g1_affine = cur_g1_affine;
         out_par[i].coeffs = cur_coeff;
         out_par[i].length = cur_len;
         pthread_create(threads + i, NULL, g1_linear_combination_thread, (void*) (out_par + i));
 
         cur_g1 += cur_len;
+        cur_g1_affine += cur_len;
         cur_coeff += cur_len;
         left -= cur_len;
     }
@@ -128,7 +133,7 @@ C_KZG_RET commit_to_poly_par(g1_t *out, const poly *p, const KZGSettings *ks, ui
  */
 void* g1_linear_combination_thread(void* p) {
     commit_par_t* out_par = (commit_par_t *)p;
-    g1_linear_combination(&(out_par->out), out_par->g1, out_par->coeffs, out_par->length);
+    g1_linear_combination(&(out_par->out), out_par->g1, out_par->g1_affine, out_par->coeffs, out_par->length);
     pthread_exit(NULL);
 }
 
