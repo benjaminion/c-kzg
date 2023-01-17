@@ -24,6 +24,38 @@
 #include "c_kzg_alloc.h"
 #include "utility.h"
 
+typedef struct poly_div_ctx {
+    // This is enabled only when divisor is of the form (x-k)
+    bool fast_path_enabled;
+
+    // The Euclidean inverse of a in (x-k)
+    blst_fr k_inverse;
+} poly_div_ctx_t;
+
+/**
+ * Internal utility for field division operation.
+ *
+ * @param[out]  out         Result of division operation
+ * @param[in]   dividend    The dividend polynomial
+ * @param[in]   divisor     The divisor polynomial
+ * @param[in]   ctx         State about the operation
+ */
+static void fr_div_op(fr_t *out, const fr_t *a, const fr_t *b, const poly_div_ctx_t *ctx) {
+    if (!ctx->fast_path_enabled) {
+        fr_div(out, a, b);
+        return;
+    }
+
+    // The divisor is of the form (x-k)
+    if (fr_is_one(b)) {
+        // Divide by 1 case.
+        *out = *a;
+        return;
+    }
+    // Division is replaced by multiplication of the cached inverse
+    fr_mul(out, a, &ctx->k_inverse);
+}
+
 /**
  * Internal utility for calculating the length to be allocated for the result of dividing two polynomials.
  *
@@ -125,6 +157,7 @@ static C_KZG_RET poly_long_div(poly *out, const poly *dividend, const poly *divi
     uint64_t b_pos = divisor->length - 1;
     uint64_t diff = a_pos - b_pos;
     fr_t *a;
+    poly_div_ctx_t div_ctx;
 
     // Dividing by zero is undefined
     CHECK(divisor->length > 0);
@@ -147,8 +180,17 @@ static C_KZG_RET poly_long_div(poly *out, const poly *dividend, const poly *divi
         a[i] = dividend->coeffs[i];
     }
 
+    // Fast path: if the divisor is a first degree polynomial of the form (x-k), the expensive
+    // fr_div() can be avoided.
+    if (divisor->length == 2 && fr_is_one(&divisor->coeffs[1])) {
+        div_ctx.fast_path_enabled = true;
+        blst_fr_eucl_inverse(&div_ctx.k_inverse, &divisor->coeffs[0]);
+    } else {
+        div_ctx.fast_path_enabled = false;
+    }
+
     while (diff > 0) {
-        fr_div(&out->coeffs[diff], &a[a_pos], &divisor->coeffs[b_pos]);
+        fr_div_op(&out->coeffs[diff], &a[a_pos], &divisor->coeffs[b_pos], &div_ctx);
         for (uint64_t i = 0; i <= b_pos; i++) {
             fr_t tmp;
             // a[diff + i] -= b[i] * quot
@@ -158,7 +200,7 @@ static C_KZG_RET poly_long_div(poly *out, const poly *dividend, const poly *divi
         --diff;
         --a_pos;
     }
-    fr_div(&out->coeffs[0], &a[a_pos], &divisor->coeffs[b_pos]);
+    fr_div_op(&out->coeffs[0], &a[a_pos], &divisor->coeffs[b_pos], &div_ctx);
 
     free(a);
     return C_KZG_OK;
