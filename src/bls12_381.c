@@ -397,10 +397,11 @@ void g2_dbl(g2_t *out, const g2_t *a) {
  *
  * Calculates `[coeffs_0]p_0 + [coeffs_1]p_1 + ... + [coeffs_n]p_n` where `n` is `len - 1`.
  *
- * @param[out] out    The resulting sum-product
- * @param[in]  p      Array of G1 group elements, length @p len
- * @param[in]  coeffs Array of field elements, length @p len
- * @param[in]  len    The number of group/field elements
+ * @param[out] out       The resulting sum-product
+ * @param[in]  p         Array of G1 group elements, length @p len
+ * @param[in]  p_affine  Array of G1 group elements in affine format, length @p len
+ * @param[in]  coeffs    Array of field elements, length @p len
+ * @param[in]  len       The number of group/field elements
  *
  * For the benefit of future generations (since Blst has no documentation to speak of),
  * there are two ways to pass the arrays of scalars and points into `blst_p1s_mult_pippenger()`.

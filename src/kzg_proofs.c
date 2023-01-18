@@ -30,6 +30,7 @@
 #include "c_kzg_alloc.h"
 #include "utility.h"
 
+// State passed to the threads computing the commitment
 typedef struct commit_par {
     g1_t out;
     g1_t *g1;
@@ -127,9 +128,9 @@ C_KZG_RET commit_to_poly_par(g1_t *out, const poly *p, const KZGSettings *ks, ui
 }
 
 /**
- * Thread processing to create the commitment.
+ * Commitment computation thread
  *
- * @param[in]  p  Thread args.
+ * @param[in] p Thread args.
  */
 void* g1_linear_combination_thread(void* p) {
     commit_par_t* out_par = (commit_par_t *)p;

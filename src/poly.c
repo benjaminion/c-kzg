@@ -24,11 +24,12 @@
 #include "c_kzg_alloc.h"
 #include "utility.h"
 
+// State for the polynomial division
 typedef struct poly_div_ctx {
     // This is enabled only when divisor is of the form (x-k)
     bool fast_path_enabled;
 
-    // The Euclidean inverse of a in (x-k)
+    // The Euclidean inverse of k in (x-k)
     blst_fr k_inverse;
 } poly_div_ctx_t;
 
@@ -180,7 +181,7 @@ static C_KZG_RET poly_long_div(poly *out, const poly *dividend, const poly *divi
         a[i] = dividend->coeffs[i];
     }
 
-    // Fast path: if the divisor is a first degree polynomial of the form (x-k), the expensive
+    // Fast path for the common case: if the divisor is a first degree polynomial (x-k), the expensive
     // fr_div() can be avoided.
     if (divisor->length == 2 && fr_is_one(&divisor->coeffs[1])) {
         div_ctx.fast_path_enabled = true;
